@@ -1,0 +1,24 @@
+{
+  "short_name": "ResQVerse",
+  "name": "ResQVerse – The Next Generation Emergency Network",
+  "description": "Guardian Mesh emergency system syncing live telemetry to emergency contacts.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b0f19",
+  "theme_color": "#ef4444",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512",
+      "purpose": "maskable"
+    }
+  ]
+}

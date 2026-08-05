@@ -1,4 +1,4 @@
-const CACHE_NAME = 'resqverse-cache-v1';
+const CACHE_NAME = 'resqverse-cache-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -72,5 +72,85 @@ self.addEventListener('fetch', (event) => {
           });
         });
       })
+  );
+});
+
+// ============================================================
+// PUSH NOTIFICATION HANDLER
+// ============================================================
+// When a push message is received, display an emergency notification
+// with vibration pattern for urgent alerts.
+self.addEventListener('push', (event) => {
+  let data = {
+    title: '🚨 RESQVERSE EMERGENCY SOS',
+    body: 'An emergency SOS has been triggered! Open app for details.',
+    icon: '/favicon.svg',
+    badge: '/favicon.svg',
+    tag: 'sos-emergency',
+    url: '/sos-success'
+  };
+
+  // Try to parse push data if available
+  if (event.data) {
+    try {
+      const pushData = event.data.json();
+      data = { ...data, ...pushData };
+    } catch (e) {
+      // If not JSON, use text as body
+      data.body = event.data.text() || data.body;
+    }
+  }
+
+  const options = {
+    body: data.body,
+    icon: data.icon,
+    badge: data.badge,
+    tag: data.tag,
+    requireInteraction: true, // Keep notification visible until user interacts
+    silent: false,            // Play notification sound
+    vibrate: [
+      500, 200, 500, 200, 500, 200,   // Three long pulses
+      100, 100, 100, 100, 100, 100,   // Rapid short pulses
+      500, 200, 500, 200, 500         // Three more long pulses
+    ],
+    actions: [
+      { action: 'open', title: '📍 View Location' },
+      { action: 'dismiss', title: 'Dismiss' }
+    ],
+    data: { url: data.url }
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, options)
+  );
+});
+
+// ============================================================
+// NOTIFICATION CLICK HANDLER
+// ============================================================
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = event.notification.data?.url || '/dashboard';
+
+  if (event.action === 'dismiss') {
+    return; // Just close the notification
+  }
+
+  // Focus existing window or open new one
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Try to focus an existing window
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      // Open a new window if none exists
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })
   );
 });

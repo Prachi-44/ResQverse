@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { isMockEnabled, db } from '../services/firebase';
 import { mockDb, type EmergencyRecord } from '../services/mockDb';
 import { useAuth } from './AuthContext';
+import { executeSOSPipeline, type SOSPipelineResult } from '../services/sosNotificationService';
 import { 
   collection, 
   addDoc, 
@@ -18,7 +19,7 @@ interface EmergencyContextType {
   emergencies: EmergencyRecord[];
   userHistory: EmergencyRecord[];
   activeEmergency: EmergencyRecord | null;
-  triggerSOS: (category?: string) => Promise<EmergencyRecord>;
+  triggerSOS: (category?: string, voiceBlob?: Blob, voiceMimeType?: string, voiceDurationMs?: number) => Promise<SOSPipelineResult>;
   markSafe: (emergencyId: string) => Promise<void>;
   fetchUserHistory: () => Promise<void>;
   loadingEmergencies: boolean;
@@ -128,8 +129,13 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
   };
 
-  // Trigger SOS handler
-  const triggerSOS = async (category?: string): Promise<EmergencyRecord> => {
+  // Trigger SOS handler — now executes the complete notification pipeline
+  const triggerSOS = async (
+    category?: string,
+    voiceBlob?: Blob,
+    voiceMimeType?: string,
+    voiceDurationMs?: number
+  ): Promise<SOSPipelineResult> => {
     if (!currentUser) throw new Error('User must be logged in to trigger SOS');
 
     // Get current GPS Location
@@ -137,10 +143,10 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const googleMapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
     const timestamp = Date.now();
 
+    let record: EmergencyRecord;
+
     if (isMockEnabled) {
-      const record = mockDb.triggerSOS(currentUser.uid, currentUser.name, latitude, longitude, category);
-      await fetchUserHistory();
-      return record;
+      record = mockDb.triggerSOS(currentUser.uid, currentUser.name, latitude, longitude, category);
     } else {
       const newEmergency = {
         userId: currentUser.uid,
@@ -155,14 +161,24 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // Add to Firestore collection
       const docRef = await addDoc(collection(db, 'emergencies'), newEmergency);
-      const record: EmergencyRecord = {
+      record = {
         emergencyId: docRef.id,
         ...newEmergency
       };
-      
-      await fetchUserHistory();
-      return record;
     }
+
+    // Execute the complete SOS notification pipeline
+    console.log(`[EmergencyContext] Executing SOS pipeline for ${record.emergencyId}...`);
+    const pipelineResult = await executeSOSPipeline(
+      record,
+      currentUser,
+      voiceBlob,
+      voiceMimeType,
+      voiceDurationMs
+    );
+
+    await fetchUserHistory();
+    return pipelineResult;
   };
 
   // Mark user as SAFE (resolving the active emergency)

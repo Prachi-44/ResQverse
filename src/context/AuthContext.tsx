@@ -88,7 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       if (isMockEnabled) {
-        mockDb.login(email);
+        await mockDb.login(email, password || '');
       } else {
         if (!password) throw new Error('Password is required for Firebase Login');
         await signInWithEmailAndPassword(auth, email, password);
@@ -111,7 +111,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       if (isMockEnabled) {
-        mockDb.register(email, name, phone, bloodGroup, contacts);
+        if (!password) throw new Error('Password is required for registration.');
+        await mockDb.register(email, password, name, phone, bloodGroup, contacts);
       } else {
         if (!password) throw new Error('Password is required for Firebase Registration');
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);

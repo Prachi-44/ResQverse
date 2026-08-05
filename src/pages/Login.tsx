@@ -24,7 +24,7 @@ export const Login: React.FC = () => {
       setError('Email is required');
       return;
     }
-    if (!isMockEnabled && !password) {
+    if (!password) {
       setError('Password is required');
       return;
     }
@@ -102,25 +102,23 @@ export const Login: React.FC = () => {
             required
           />
 
-          {!isMockEnabled && (
-            <Input
-              id="password"
-              type="password"
-              label="Node Password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setError('');
-              }}
-              icon={<Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" />}
-              required
-            />
-          )}
+          <Input
+            id="password"
+            type="password"
+            label="Node Password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setError('');
+            }}
+            icon={<Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" />}
+            required
+          />
 
           {isMockEnabled && (
             <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/25 text-yellow-700 dark:text-yellow-500 text-[11px] leading-relaxed text-left">
-              <strong>Demo Credentials:</strong> Type any email address to login. Password is not required in Demo/Mock mode.
+              <strong>Demo Mode:</strong> Use the email and password you registered with. Your account data is stored locally in this browser.
             </div>
           )}
 

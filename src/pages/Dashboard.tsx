@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useEmergency } from '../context/EmergencyContext';
 import { useToast } from '../context/ToastContext';
 import { useLanguage } from '../context/LanguageContext';
 import { Button } from '../components/Button';
+import { 
+  startVoiceRecording, 
+  stopVoiceRecording, 
+  isVoiceRecording, 
+  requestNotificationPermission 
+} from '../services/sosNotificationService';
 import { 
   ShieldCheck, 
   ShieldAlert, 
@@ -22,7 +28,8 @@ import {
   MicOff,
   Volume2,
   Eye,
-  Send
+  Send,
+  Radio
 } from 'lucide-react';
 
 type EmergencyCategory = 'Medical' | 'Accident' | 'Security' | 'Fire';
@@ -136,9 +143,20 @@ export const Dashboard: React.FC = () => {
   // Discreet Screen Mask state
   const [isMasked, setIsMasked] = useState(false);
 
+  // Voice Message Recording state
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const voiceBlobRef = useRef<{ blob: Blob; durationMs: number; mimeType: string } | null>(null);
+
   // Sync history and monitor network connection
   useEffect(() => {
     fetchUserHistory();
+
+    // Request notification permission proactively
+    requestNotificationPermission().then(permission => {
+      if (permission === 'granted') {
+        console.log('[Dashboard] Notification permission granted.');
+      }
+    });
 
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -362,13 +380,75 @@ export const Dashboard: React.FC = () => {
     showToast('SOS broadcast canceled.', 'info');
   };
 
+  // Toggle voice message recording
+  const toggleVoiceRecording = async () => {
+    if (isRecordingVoice) {
+      try {
+        const result = await stopVoiceRecording();
+        voiceBlobRef.current = result;
+        setIsRecordingVoice(false);
+        showToast(`Voice message recorded (${Math.round(result.durationMs / 1000)}s). Will be sent with SOS.`, 'success');
+      } catch (err: any) {
+        console.error(err);
+        setIsRecordingVoice(false);
+        showToast(err.message || 'Failed to stop recording.', 'error');
+      }
+    } else {
+      try {
+        await startVoiceRecording();
+        setIsRecordingVoice(true);
+        voiceBlobRef.current = null;
+        showToast('🎙️ Recording voice message... Click again to stop.', 'info');
+      } catch (err: any) {
+        console.error(err);
+        showToast(err.message || 'Failed to start recording.', 'error');
+      }
+    }
+  };
+
   const handleFinalTrigger = async () => {
     setIsCountingDown(false);
     setLoadingAction(true);
     try {
       showToast('Acquiring high-precision GPS coordinates...', 'info');
-      await triggerSOS(selectedCategory);
-      showToast(`${selectedCategory} SOS Alert successfully broadcasted across Guardian Mesh!`, 'success');
+
+      // If voice recording is still active, stop it and capture the blob
+      let voiceBlob: Blob | undefined;
+      let voiceMimeType: string | undefined;
+      let voiceDurationMs: number | undefined;
+      
+      if (isRecordingVoice && isVoiceRecording()) {
+        try {
+          const result = await stopVoiceRecording();
+          voiceBlob = result.blob;
+          voiceMimeType = result.mimeType;
+          voiceDurationMs = result.durationMs;
+          setIsRecordingVoice(false);
+          showToast('Voice message captured. Sending with SOS...', 'info');
+        } catch (err) {
+          console.warn('Failed to capture voice during SOS:', err);
+        }
+      } else if (voiceBlobRef.current) {
+        // Use previously recorded voice message
+        voiceBlob = voiceBlobRef.current.blob;
+        voiceMimeType = voiceBlobRef.current.mimeType;
+        voiceDurationMs = voiceBlobRef.current.durationMs;
+      }
+
+      const result = await triggerSOS(selectedCategory, voiceBlob, voiceMimeType, voiceDurationMs);
+      voiceBlobRef.current = null; // Clear after sending
+      
+      // Report results
+      const smsSent = result.smsResults.filter(r => r.status === 'sent').length;
+      const smsFailed = result.smsResults.filter(r => r.status === 'failed').length;
+      
+      let resultMsg = `${selectedCategory} SOS broadcasted! SMS: ${smsSent} sent`;
+      if (smsFailed > 0) resultMsg += `, ${smsFailed} failed`;
+      if (result.voiceMessageStored) resultMsg += ' | Voice message attached';
+      if (result.pushResult.notified > 0) resultMsg += ` | ${result.pushResult.notified} push notifications sent`;
+      if (result.pushResult.vibrated) resultMsg += ' | Device vibrated';
+      
+      showToast(resultMsg, 'success');
       navigate('/sos-success');
     } catch (err: any) {
       console.error(err);
@@ -447,11 +527,11 @@ export const Dashboard: React.FC = () => {
   const selectedConfig = categoryConfigs[selectedCategory];
   const latestHistoryRecord = userHistory[0] || null;
 
-  // Offline SMS Href builder
-  const primaryPhone = currentUser?.contacts?.[0]?.phone || '';
+  // Offline SMS Href builder — ALL guardian phone numbers
+  const allGuardianPhones = (currentUser?.contacts || []).map(c => c.phone).filter(p => p && p.trim() !== '');
   const smsBodyText = `RESQVERSE EMERGENCY ALERT!\nGuardian: ${currentUser?.name}\nDistress: ${selectedCategory}\nLocation: https://www.google.com/maps?q=${activeEmergency?.latitude || 0},${activeEmergency?.longitude || 0}`;
-  const smsLink = primaryPhone 
-    ? `sms:${primaryPhone}?body=${encodeURIComponent(smsBodyText)}` 
+  const smsLink = allGuardianPhones.length > 0
+    ? `sms:${allGuardianPhones.join(',')}?body=${encodeURIComponent(smsBodyText)}` 
     : '#';
 
   // Render Discreet Screen Mask
@@ -629,6 +709,30 @@ export const Dashboard: React.FC = () => {
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isListening ? 'translate-x-6' : 'translate-x-1'}`} />
                   </div>
                 </div>
+
+                {/* Voice Message Recording Toggle */}
+                <div 
+                  onClick={toggleVoiceRecording}
+                  className={`p-4 rounded-2xl bg-white/40 dark:bg-slate-900/30 border border-slate-250 dark:border-slate-800 flex items-center justify-between gap-4 cursor-pointer select-none active:scale-[0.99] hover:bg-white/60 dark:hover:bg-slate-900/40 transition-all duration-200 ${isRecordingVoice ? 'border-red-500/40 bg-red-500/5' : voiceBlobRef.current ? 'border-green-500/40 bg-green-500/5' : ''}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2.5 rounded-xl border ${isRecordingVoice ? 'bg-red-500/10 text-red-500 border-red-500/25 animate-pulse' : voiceBlobRef.current ? 'bg-green-500/10 text-green-500 border-green-500/25' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-400 border-slate-250 dark:border-slate-700'}`}>
+                      <Radio className="w-4.5 h-4.5" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Voice Message</p>
+                      <p className="text-[10px] text-slate-400">
+                        {isRecordingVoice ? '🔴 Recording... Tap to stop' : voiceBlobRef.current ? `✅ Recorded (${Math.round(voiceBlobRef.current.durationMs / 1000)}s) — will send with SOS` : 'Tap to record a voice message'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isRecordingVoice ? 'bg-red-500' : voiceBlobRef.current ? 'bg-green-500' : 'bg-slate-350 dark:bg-slate-700'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isRecordingVoice || voiceBlobRef.current ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </div>
+                </div>
               </div>
 
               {/* SOS Trigger circular button & Radar screen */}
@@ -750,7 +854,7 @@ export const Dashboard: React.FC = () => {
                 <a
                   href={smsLink}
                   onClick={(e) => {
-                    if (!primaryPhone) {
+                    if (allGuardianPhones.length === 0) {
                       e.preventDefault();
                       showToast('Please register emergency contacts in your profile first.', 'warning');
                     } else {
